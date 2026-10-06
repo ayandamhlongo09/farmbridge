@@ -103,12 +103,21 @@ final class OutboxQueue {
       if (selected == null) return SyncOutcome.blocked;
 
       final item = selected.item;
-      if (item is PhotoUpload) {
-        throw UnsupportedError('Photo transfer is not implemented yet');
-      }
       try {
-        await uplink.submit(item);
-        await store.acknowledge(item);
+        if (item is PhotoUpload) {
+          final index = selected.nextChunk;
+          if (index < 0 || index > item.chunkCount) {
+            throw StateError('Invalid photo checkpoint for ${item.id}');
+          }
+          if (index < item.chunkCount) {
+            await uplink.uploadChunk(item, index);
+            await store.checkpoint(item.id, index + 1);
+          }
+          if (index + 1 >= item.chunkCount) await store.acknowledge(item);
+        } else {
+          await uplink.submit(item);
+          await store.acknowledge(item);
+        }
       } on RetryableUplinkFailure {
         return SyncOutcome.retryLater;
       } on TimeoutException {

@@ -6,6 +6,7 @@ class MemoryStore implements OutboxStore {
   final items = <String, PendingItem>{};
   final visits = <String>{};
   final usedIds = <String>{};
+  bool failCheckpoint = false;
 
   @override
   Future<void> add(OutboxItem item) async {
@@ -21,6 +22,7 @@ class MemoryStore implements OutboxStore {
 
   @override
   Future<void> checkpoint(String photoId, int nextChunk) async {
+    if (failCheckpoint) throw StateError('Disk full');
     items[photoId] = PendingItem(items[photoId]!.item, nextChunk: nextChunk);
   }
 
@@ -39,27 +41,30 @@ class FakeUplink implements Uplink {
   String? silentCommitOnce;
   bool unexpectedFailure = false;
 
+  Future<void> Function(String key)? beforeSend;
+
   @override
-  Future<Receipt> submit(OutboxItem item) async {
-    attempts.add(item.id);
+  Future<Receipt> submit(OutboxItem item) => _send(item.id);
+
+  @override
+  Future<Receipt> uploadChunk(PhotoUpload photo, int index) =>
+      _send('${photo.id}:$index');
+
+  Future<Receipt> _send(String key) async {
+    attempts.add(key);
+    await beforeSend?.call(key);
     if (unexpectedFailure) throw StateError('Server rejected the request');
-    if (disconnectOnce == item.id) {
+    if (disconnectOnce == key) {
       disconnectOnce = null;
-      throw const RetryableUplinkFailure('Signal lost before commitment');
+      throw const RetryableUplinkFailure('Signal lost mid-transfer');
     }
-    final receipt =
-        committed.add(item.id) ? Receipt.accepted : Receipt.duplicate;
-    if (silentCommitOnce == item.id) {
+    final receipt = committed.add(key) ? Receipt.accepted : Receipt.duplicate;
+    if (silentCommitOnce == key) {
       silentCommitOnce = null;
       throw TimeoutException('Committed, but acknowledgment lost');
     }
     replies.add(receipt);
     return receipt;
-  }
-
-  @override
-  Future<Receipt> uploadChunk(PhotoUpload photo, int index) async {
-    throw UnsupportedError('Photo transfer is not implemented yet');
   }
 }
 
@@ -162,5 +167,77 @@ void main() {
     uplink.unexpectedFailure = false;
     expect(await queue.sync(), SyncOutcome.drained);
     expect(uplink.committed, {'visit'});
+  });
+
+  PhotoUpload photo([int chunks = 3]) =>
+      PhotoUpload('photo', 'visit', '/photo', chunks);
+
+  test('structured data from both visits precedes photos', () async {
+    await queue.enqueue(photo(1));
+    await queue.enqueue(Observation('observation', 'visit', {}));
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(visit('visit-2'));
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, ['visit', 'visit-2', 'observation', 'photo:0']);
+  });
+
+  test('interrupted photo resumes at chunk N after worker reconstruction',
+      () async {
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(photo());
+    uplink.disconnectOnce = 'photo:1';
+    expect(await queue.sync(), SyncOutcome.retryLater);
+    expect(store.items['photo']!.nextChunk, 1);
+    queue = OutboxQueue(store, uplink);
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(
+        uplink.attempts, ['visit', 'photo:0', 'photo:1', 'photo:1', 'photo:2']);
+  });
+
+  test('lost final chunk acknowledgment retains the photo and replays safely',
+      () async {
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(photo(1));
+    uplink.silentCommitOnce = 'photo:0';
+    expect(await queue.sync(), SyncOutcome.retryLater);
+    expect(store.items['photo']!.nextChunk, 0);
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, ['visit', 'photo:0', 'photo:0']);
+    expect(uplink.committed, {'visit', 'photo:0'});
+    expect(uplink.replies.last, Receipt.duplicate);
+  });
+
+  test('new structured data preempts photos at the next chunk boundary',
+      () async {
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(photo());
+    uplink.beforeSend = (key) async {
+      if (key == 'photo:0') {
+        await queue.enqueue(visit('new-visit'));
+        await queue.enqueue(Observation('new-observation', 'new-visit', {}));
+      }
+    };
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, [
+      'visit',
+      'photo:0',
+      'new-visit',
+      'new-observation',
+      'photo:1',
+      'photo:2'
+    ]);
+  });
+
+  test('checkpoint failure retains progress and safely replays committed chunk',
+      () async {
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(photo(1));
+    store.failCheckpoint = true;
+    await expectLater(queue.sync(), throwsStateError);
+    expect(store.items['photo']!.nextChunk, 0);
+    store.failCheckpoint = false;
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, ['visit', 'photo:0', 'photo:0']);
+    expect(uplink.committed, {'visit', 'photo:0'});
   });
 }
