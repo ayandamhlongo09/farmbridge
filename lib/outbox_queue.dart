@@ -1,0 +1,77 @@
+sealed class OutboxItem {
+  OutboxItem(this.id) {
+    if (id.isEmpty) throw ArgumentError.value(id, 'id');
+  }
+
+  final String id;
+  int get priority;
+  String? get visitId => null;
+}
+
+final class VisitRecord extends OutboxItem {
+  VisitRecord(super.id, Map<String, String> data)
+      : data = Map.unmodifiable(data);
+
+  final Map<String, String> data;
+  @override
+  int get priority => 0;
+}
+
+final class Observation extends OutboxItem {
+  Observation(super.id, this.visitId, Map<String, String> data)
+      : data = Map.unmodifiable(data);
+
+  @override
+  final String visitId;
+  final Map<String, String> data;
+  @override
+  int get priority => 1;
+}
+
+final class PhotoUpload extends OutboxItem {
+  PhotoUpload(super.id, this.visitId, this.filePath, this.chunkCount) {
+    if (chunkCount <= 0) throw ArgumentError.value(chunkCount, 'chunkCount');
+  }
+
+  @override
+  final String visitId;
+  final String filePath;
+  final int chunkCount;
+  @override
+  int get priority => 2;
+}
+
+final class PendingItem {
+  const PendingItem(this.item, {this.nextChunk = 0});
+
+  final OutboxItem item;
+  final int nextChunk;
+}
+
+abstract interface class OutboxStore {
+  Future<void> add(OutboxItem item);
+
+  Future<List<PendingItem>> pending();
+  Future<bool> visitAcknowledged(String id);
+  Future<void> checkpoint(String photoId, int nextChunk);
+
+  Future<void> acknowledge(OutboxItem item);
+}
+
+enum Receipt { accepted, duplicate }
+
+abstract interface class Uplink {
+  Future<Receipt> submit(OutboxItem item);
+
+  Future<Receipt> uploadChunk(PhotoUpload photo, int index);
+}
+
+final class RetryableUplinkFailure implements Exception {
+  const RetryableUplinkFailure(this.message);
+
+  final String message;
+  @override
+  String toString() => message;
+}
+
+enum SyncOutcome { drained, retryLater, blocked }
