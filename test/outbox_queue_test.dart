@@ -240,4 +240,18 @@ void main() {
     expect(uplink.attempts, ['visit', 'photo:0', 'photo:0']);
     expect(uplink.committed, {'visit', 'photo:0'});
   });
+
+  test('concurrent sync triggers share one worker and submit once', () async {
+    await queue.enqueue(visit('visit'));
+    final gate = Completer<void>();
+    uplink.beforeSend = (_) => gate.future;
+    final first = queue.sync();
+    final second = queue.sync();
+    final shared = identical(first, second);
+    gate.complete();
+    expect(await Future.wait([first, second]),
+        [SyncOutcome.drained, SyncOutcome.drained]);
+    expect(shared, isTrue);
+    expect(uplink.attempts, ['visit']);
+  });
 }

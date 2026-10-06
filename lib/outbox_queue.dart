@@ -83,10 +83,14 @@ final class OutboxQueue {
 
   final OutboxStore store;
   final Uplink uplink;
+  Future<SyncOutcome>? _active;
 
   Future<void> enqueue(OutboxItem item) => store.add(item);
 
-  Future<SyncOutcome> sync() async {
+  Future<SyncOutcome> sync() =>
+      _active ??= _drain().whenComplete(() => _active = null);
+
+  Future<SyncOutcome> _drain() async {
     while (true) {
       final pending = await store.pending();
       if (pending.isEmpty) return SyncOutcome.drained;
