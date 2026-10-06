@@ -75,3 +75,37 @@ final class RetryableUplinkFailure implements Exception {
 }
 
 enum SyncOutcome { drained, retryLater, blocked }
+
+final class OutboxQueue {
+  OutboxQueue(this.store, this.uplink);
+
+  final OutboxStore store;
+  final Uplink uplink;
+
+  Future<void> enqueue(OutboxItem item) => store.add(item);
+
+  Future<SyncOutcome> sync() async {
+    while (true) {
+      final pending = await store.pending();
+      if (pending.isEmpty) return SyncOutcome.drained;
+
+      PendingItem? selected;
+      for (final candidate in pending) {
+        final parent = candidate.item.visitId;
+        if (parent != null && !await store.visitAcknowledged(parent)) continue;
+        if (selected == null ||
+            candidate.item.priority < selected.item.priority) {
+          selected = candidate;
+        }
+      }
+      if (selected == null) return SyncOutcome.blocked;
+
+      final item = selected.item;
+      if (item is PhotoUpload) {
+        throw UnsupportedError('Photo transfer is not implemented yet');
+      }
+      await uplink.submit(item);
+      await store.acknowledge(item);
+    }
+  }
+}
