@@ -1,3 +1,5 @@
+import 'dart:async';
+
 sealed class OutboxItem {
   OutboxItem(this.id) {
     if (id.isEmpty) throw ArgumentError.value(id, 'id');
@@ -104,8 +106,14 @@ final class OutboxQueue {
       if (item is PhotoUpload) {
         throw UnsupportedError('Photo transfer is not implemented yet');
       }
-      await uplink.submit(item);
-      await store.acknowledge(item);
+      try {
+        await uplink.submit(item);
+        await store.acknowledge(item);
+      } on RetryableUplinkFailure {
+        return SyncOutcome.retryLater;
+      } on TimeoutException {
+        return SyncOutcome.retryLater;
+      }
     }
   }
 }

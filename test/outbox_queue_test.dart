@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:farm_bridge/outbox_queue.dart';
 import 'package:test/test.dart';
 
@@ -32,11 +33,28 @@ class MemoryStore implements OutboxStore {
 
 class FakeUplink implements Uplink {
   final attempts = <String>[];
+  final committed = <String>{};
+  final replies = <Receipt>[];
+  String? disconnectOnce;
+  String? silentCommitOnce;
+  bool unexpectedFailure = false;
 
   @override
   Future<Receipt> submit(OutboxItem item) async {
     attempts.add(item.id);
-    return Receipt.accepted;
+    if (unexpectedFailure) throw StateError('Server rejected the request');
+    if (disconnectOnce == item.id) {
+      disconnectOnce = null;
+      throw const RetryableUplinkFailure('Signal lost before commitment');
+    }
+    final receipt =
+        committed.add(item.id) ? Receipt.accepted : Receipt.duplicate;
+    if (silentCommitOnce == item.id) {
+      silentCommitOnce = null;
+      throw TimeoutException('Committed, but acknowledgment lost');
+    }
+    replies.add(receipt);
+    return receipt;
   }
 
   @override
@@ -101,5 +119,48 @@ void main() {
     expect(await queue.sync(), SyncOutcome.drained);
     expect(await queue.sync(), SyncOutcome.drained);
     expect(uplink.attempts, ['visit']);
+  });
+
+  test('sync after silent-commit timeout does not duplicate the visit',
+      () async {
+    await queue.enqueue(visit('visit'));
+    uplink.silentCommitOnce = 'visit';
+    expect(await queue.sync(), SyncOutcome.retryLater);
+    expect(store.items.keys, ['visit']);
+    expect(uplink.committed, {'visit'});
+
+    queue = OutboxQueue(store, uplink);
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, ['visit', 'visit']);
+    expect(uplink.committed, {'visit'});
+    expect(uplink.replies, [Receipt.duplicate]);
+    expect(store.items, isEmpty);
+  });
+
+  test('disconnect retains parent and children until a later attempt succeeds',
+      () async {
+    await queue.enqueue(visit('visit'));
+    await queue.enqueue(Observation('observation', 'visit', {}));
+    uplink.disconnectOnce = 'visit';
+    expect(await queue.sync(), SyncOutcome.retryLater);
+    expect(uplink.attempts, ['visit']);
+    expect(uplink.committed, isEmpty);
+    expect(store.items.keys, ['visit', 'observation']);
+
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.attempts, ['visit', 'visit', 'observation']);
+    expect(store.items, isEmpty);
+  });
+
+  test('unexpected errors propagate without discarding pending work', () async {
+    await queue.enqueue(visit('visit'));
+    uplink.unexpectedFailure = true;
+    await expectLater(queue.sync(), throwsStateError);
+    expect(store.items.keys, ['visit']);
+    expect(uplink.committed, isEmpty);
+
+    uplink.unexpectedFailure = false;
+    expect(await queue.sync(), SyncOutcome.drained);
+    expect(uplink.committed, {'visit'});
   });
 }
