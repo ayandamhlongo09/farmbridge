@@ -83,7 +83,7 @@ sequenceDiagram
     Store-->>Queue: Visit with stable operation ID
     Queue->>Server: submit same operation ID and content
     Server->>Server: Commit operation once
-    Server--xQueue: Confirmation lost; TimeoutException
+    Server--xQueue: Confirmation lost, TimeoutException
     Queue-->>Caller: retryLater
     Note over Store: Visit remains pending
     Caller->>Queue: sync() later
@@ -92,7 +92,7 @@ sequenceDiagram
     Queue->>Server: Retry same operation
     Server-->>Queue: duplicate receipt
     Queue->>Store: acknowledge visit
-    Store->>Store: Dequeue; retain visit acknowledgment
+    Store->>Store: Dequeue, retain visit acknowledgment
     Queue-->>Caller: drained if no other work remains
 ```
 
@@ -107,7 +107,7 @@ sequenceDiagram
     participant Queue as OutboxQueue
     participant Store as OutboxStore
     participant Server as Uplink / fake server
-    Note over Queue,Store: Parent visit already acknowledged; nextChunk = 0
+    Note over Queue,Store: Parent visit already acknowledged, nextChunk = 0
     Caller->>Queue: sync()
     Queue->>Server: uploadChunk(photo, 0)
     Server-->>Queue: accepted
@@ -122,7 +122,7 @@ sequenceDiagram
     Queue->>Server: uploadChunk(photo, 1)
     Server-->>Queue: accepted or matching duplicate
     Queue->>Store: checkpoint(photo, 2)
-    Queue->>Store: Re-read pending; new structured data goes first
+    Queue->>Store: Re-read pending, new structured data goes first
     Note over Queue,Server: Deliver eligible visits/observations before continuing photo
     Queue->>Server: uploadChunk(photo, 2)
     Server-->>Queue: accepted
