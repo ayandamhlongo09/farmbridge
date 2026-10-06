@@ -27,3 +27,30 @@
   attempt but do not guarantee a working connection. Keep pending work visible
   to the agent. Continuous structured-data capture could starve photos; measure
   that before introducing a fairness policy.
+
+## 2. Conflict resolution
+
+- Keep visit observations as independent facts. For mutable standing records,
+  such as a field's hectare count, send each correction with its operation ID
+  and the server revision the agent originally edited. Device timestamps are
+  display metadata, not a reliable way to choose the winning correction.
+- Suppose A and B both edit revision 7: A proposes 12.5 hectares and B proposes
+  13.0, with B's clock three hours behind. If A syncs first, the server atomically
+  accepts 12.5 as revision 8. B's correction still refers to revision 7, so the
+  server preserves 13.0 as an unresolved conflict instead of overwriting 12.5.
+  If B arrives first, the outcome is symmetric; arrival order does not establish
+  which measurement is correct.
+- B sees the conflict on submission. A sees it on the next download of server
+  changes. Once both have refreshed, they see the provisional current value and
+  both proposed corrections. Before refreshing, A may still see its earlier
+  confirmed value. Offline local edits remain visible as pending work.
+- An authorized reviewer chooses or corrects the value against the current
+  server revision, retaining the proposals and resolution in audit history.
+  A concurrent correction can cause another conflict. Do not average the values:
+  there is no evidence that averaging would produce the correct hectare count.
+- A durable conflict receipt confirms the proposal was delivered, not that the
+  disagreement was resolved. Keep resolution state separate from upload state.
+- Clock-based last-write-wins could wrongly discard B's correction because its
+  clock is behind. Server-arrival last-write-wins avoids clock skew but still
+  silently loses a competing correction. Revision checks detect the conflict;
+  human review determines the appropriate value.
