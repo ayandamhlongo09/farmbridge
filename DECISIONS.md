@@ -80,3 +80,22 @@
 - Retain server deduplication records for the full supported offline/retry
   lifetime. This provides idempotent effects despite repeated delivery attempts;
   it does not claim exactly-once network delivery.
+
+## 4. Local persistence and BLoC integration
+
+- Use SQLite through `drift` / `drift_flutter`. Transactions save captured
+  records and outbox entries together; relational queries handle dependencies,
+  while typed queries, migrations and reactive reads support the offline app.
+- Store immutable photo files using `path_provider`, with paths, hashes and
+  checkpoints in SQLite. Reconcile interrupted file writes on startup; retain
+  files until confirmed upload and the retention policy permits cleanup.
+- `sqflite` is viable, but needs more manual mapping and reactive plumbing.
+  Reject `shared_preferences` for critical records because durable writes are
+  not guaranteed; prefer SQL over `hive` for related records and queue queries.
+- `VisitBloc` sends capture events to a repository that saves locally.
+  `SyncBloc` requests sync and observes repository progress/conflict streams.
+  BLoCs own presentation state; the repository and queue own persistent work.
+  Use `BlocBuilder` for rendering and `BlocListener` for notifications. Keep
+  local capture, remote delivery and conflict resolution distinct in the UI.
+- These describe Flutter integration; Part 2 remains pure Dart with fake storage
+  and network interfaces, without a database or UI implementation.
