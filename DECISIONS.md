@@ -99,3 +99,20 @@
   local capture, remote delivery and conflict resolution distinct in the UI.
 - These describe Flutter integration; Part 2 remains pure Dart with fake storage
   and network interfaces, without a database or UI implementation.
+
+## 5. Least certain trade-off
+
+- Human resolution preserves competing hectare corrections, but delays an
+  authoritative value and creates review work. A reasonable alternative is
+  server-arrival last-write-wins with complete audit history and undo: it
+  converges automatically, is simpler, and may suit low-risk corrections.
+- I prefer explicit resolution because hectare counts affect downstream
+  decisions. Validate conflict frequency, business impact and reviewer turnaround
+  with agronomists before committing to that operational cost.
+
+## Scope and AI assistance
+
+- AI helped clarify BLoC integration and its separation from the repository
+  and sync queue, and assisted with drafting the design and implementation.
+  During review, the design was refined to prioritize structured data across
+  visits, preserve stable retry IDs
