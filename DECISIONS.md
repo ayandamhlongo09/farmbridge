@@ -54,3 +54,29 @@
   clock is behind. Server-arrival last-write-wins avoids clock skew but still
   silently loses a competing correction. Revision checks detect the conflict;
   human review determines the appropriate value.
+
+## 3. Duplicate prevention and offline operation IDs
+
+- Generate a UUID v4 operation ID once at capture using cryptographically secure
+  randomness. Devices generate IDs independently while offline; clocks and local
+  counters are not used for uniqueness. The 122 random bits make collisions
+  negligibly likely, not impossible. Persist the ID with the domain record and
+  outbox entry in one transaction, and reuse it on every retry.
+- Keep the operation's payload immutable. A later correction is a new operation
+  with a new ID; retrying an uncertain upload is the same operation with the same
+  ID. Two agents visiting the same farm still create distinct visit operations.
+- The server enforces uniqueness on `(account, operation ID)` and atomically
+  saves the domain mutation and its receipt. An existing ID with matching content
+  returns the original result; an existing ID with different content is rejected
+  and kept locally for investigation, never silently treated as delivered.
+- If the server saves a visit but the confirmation is lost, the app retains the
+  pending entry. Its next attempt reuses the original ID; the server returns the
+  saved receipt without creating another visit. Remove pending work only after a
+  durable accepted or matching duplicate receipt. A crash before local dequeue
+  uses the same recovery path; retain parent acknowledgment when dequeuing.
+- Photo chunks use stable photo IDs and chunk indexes, with matching content
+  verified by the server. A lost chunk receipt causes that chunk to be replayed,
+  not its ID to change or the local checkpoint to advance speculatively.
+- Retain server deduplication records for the full supported offline/retry
+  lifetime. This provides idempotent effects despite repeated delivery attempts;
+  it does not claim exactly-once network delivery.
