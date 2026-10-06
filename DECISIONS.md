@@ -116,3 +116,6 @@
   and sync queue, and assisted with drafting the design and implementation.
   During review, the design was refined to prioritize structured data across
   visits, preserve stable retry IDs
+
+- AI also assisted with the tests, diagrams, development record and the
+  source-grounded contractor review.

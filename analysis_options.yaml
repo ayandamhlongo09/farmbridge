@@ -1,4 +1,7 @@
 analyzer:
+  # Supplied contractor reference, preserved unchanged for review.
+  exclude:
+    - review_source/**
   language:
     strict-casts: true
     strict-inference: true
